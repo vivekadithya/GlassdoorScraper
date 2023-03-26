@@ -9,6 +9,8 @@ import json
 from selenium import webdriver
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.wait import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 
 RE_ESTIMATE_TYPE = r'(Employer|Glassdoor)'
@@ -66,15 +68,30 @@ class GlassdoorScraper:
         else:
             raise DriverTypeNotSupported('Only Chrome driver is currently supported.')
 
-    def go_to_glassdoor(self, keyword: str) -> None:
+    def go_to_glassdoor(self) -> None:
         """
         Navigate to the requested job listing search page in Glassdoor.com
-        Args:
-            keyword (_type_): requested job eg: data science, data engineering, etc.
         """
 
-        self.driver.get(f"https://www.glassdoor.com/Job/{keyword.lower().replace(' ', '-')}-jobs-SRCH_KO0,14.htm?clickSource=searchBox")
+        self.driver.get(f"https://www.glassdoor.com/Job")
 
+    def search_for_job(self, keyword, wait: object=None, location: str=None) -> None:
+        """
+        Search for the job in Glassdoor.com
+        Args:
+            keyword : title of the job of interest. Defaults to None.
+            location (str, optional): Location preference for the job. Defaults to None.
+            wait (obj, optional): selenium driver wait object
+        """
+
+        wait.until(EC.presence_of_element_located((By.XPATH, "//input[(@id='sc.keyword') and (@name='sc.keyword')]"))).send_keys(keyword)
+
+        if location:
+            wait.until(EC.presence_of_element_located((By.XPATH, "//input[@id='sc.location']"))).send_keys(location)
+
+        wait.until(EC.presence_of_element_located((By.XPATH, "//button[@data-test='search-bar-submit']"))).click()
+
+        sleep(5)
 
     def exit_salary_estimate_popup(self) -> None:
         """
@@ -110,22 +127,31 @@ class GlassdoorScraper:
         """
         return f"//div[@id='EmpBasicInfo']/descendant::*[contains(text(),'{keyword}')]/following::*"
 
-    def get_jobs_data(self, keyword: str=None, num_jobs: int=0, verbose: bool=False) -> None:
+    def get_jobs_data(self, keyword: str=None, location: str=None, num_jobs: int=0, verbose: bool=False) -> None:
         """
         Navigate to Glassdoor website and scrape the specified number of jobs if available
         Args:
-            keyword (str, optional): job to be scraped. Defaults to None.
+            keyword (str, optional): job title of interest. Defaults to None.
+            location (str, optional): job location preference. Defaults to None.
             num_jobs (int, optional): number of jobs to be scraped. Defaults to 0.
             verbose (bool, optional): display the job information. Defaults to False.
         """
         scraped_jobs = []
+
+        jobs_tracker = []
 
         # Raises an exception if the job is not specified
         if not keyword:
             raise ValueError(" Keyword argument is not specified! Please specify the job to be scraped.")
 
         # Go to the specific job's listing page in Glassdoor
-        self.go_to_glassdoor(keyword=keyword)
+        self.go_to_glassdoor()
+
+        # Explicitly define wait time
+        wait = WebDriverWait(self.driver, 60)
+
+        # Search the job and location
+        self.search_for_job(keyword=keyword, wait=wait, location=location)
 
         # Ensure that you aren't scraping jobs more than what you need
         while len(scraped_jobs) < num_jobs:
@@ -133,12 +159,15 @@ class GlassdoorScraper:
             sleep(2)
 
             # Grab all the jobs in page
-            job_listings = self.driver.find_elements(By.XPATH, ".//*[@data-test='jobListing']")
+            if wait.until(EC.presence_of_element_located((By.XPATH,".//*[@data-test='jobListing']"))):
+                job_listings = self.driver.find_elements(By.XPATH, ".//*[@data-test='jobListing']")
 
             # Loop through each of the job in the listing
             for job in job_listings:
 
-                print(f"\n\nProgress: {len(scraped_jobs)} / {num_jobs}")
+                print(f"\n\nProgress: {len(scraped_jobs) + 1} / {num_jobs}")
+
+                duplicate = False
 
                 # Terminate when enough number of jobs have been parsed
                 if len(scraped_jobs) >= num_jobs:
@@ -165,9 +194,9 @@ class GlassdoorScraper:
                 while not collected_successfully:
                     try:
 
-                        # Get the company name
-                        company_name = self.driver.find_element(By.XPATH, "//*[@data-test='hero-header-module']\
-                                                                //*[@data-test='employerName']//self::div").text
+                        # Get the company name; wait and check for the element to be located
+                        company_name = wait.until(EC.presence_of_element_located((By.XPATH, "//*[@data-test='hero-header-module']//*[@data-test='employerName']//self::div"))).text
+
                         company_name = company_name.split('\n')[0]
 
                         # Get the job title
@@ -175,6 +204,16 @@ class GlassdoorScraper:
 
                         # Get the job location
                         location = self.driver.find_element(By.XPATH, "//*[@data-test='hero-header-module']//*[@data-test='location']").text
+
+                        # If the current job is a duplicate, skip to the next
+                        if f"{company_name}_{job_title}_{location}" in jobs_tracker:
+                            collected_successfully = True
+                            print(f"Duplicate! Skipping to the next. - {company_name}_{job_title}_{location}")
+                            duplicate = True
+                        else:
+                            jobs_tracker.append(f"{company_name}_{job_title}_{location}")
+
+                        print(f"{company_name}_{job_title}_{location}")
 
                         # Get the salary information
                         try:
@@ -217,7 +256,7 @@ class GlassdoorScraper:
 
                             # Parse the base salary value
                             if re.search(RE_AVG_BASE_SAL, avg_base_salary_est):
-                                avg_base_salary_value = re.search(RE_AVG_BASE_SAL, avg_base_salary_est).group(0)
+                                avg_base_salary_value = re.search(RE_AVG_BASE_SAL, avg_base_salary_est).group(0).replace(",", "")
                             else:
                                 avg_base_salary_value = -1
 
@@ -236,7 +275,7 @@ class GlassdoorScraper:
 
                         except NoSuchElementException:
                             avg_base_salary_value, is_avg_base_salary_yearly, is_avg_base_salary_hourly = -1, 0, 0
-                        
+
                         # Get the job description
                         try:
                             job_description = self.driver.find_element(By.XPATH, "//*[contains(@class,'jobDescriptionContent')]").text
@@ -305,64 +344,66 @@ class GlassdoorScraper:
                             size = None
 
                         collected_successfully = True
-                    
+
                     # Sleep and retry if the web driver crashed 
                     except DriverUnsuccessful:
                         sleep(5)
+                if not duplicate:
+                    if verbose:
+                        print(f"Job Title: {job_title}")
+                        print(f"Salary Estimate: {lower_salary_estimate} - {higher_salary_estimate}")
+                        print(f"Salary Estimate Type: {estimate_type}")
+                        print(f"Company: {company_name}")
+                        print(f"Location: {location}")
+                        print(f"Company Rating: {rating}")
+                        print(f"Avg Base Salary: {avg_base_salary_value}")
+                        print(f"is Avg Base Salary per Hour: {is_avg_base_salary_hourly}")
+                        print(f"is Avg Base Salary per Year: {is_avg_base_salary_yearly}")
+                        print(f"Year Founded: {yr_founded}")
+                        print(f"Years Active: {yr_active}")
+                        print(f"Industry: {industry}")
+                        print(f"Sector: {sector}")
+                        print(f"Company Type: {company_type}")
+                        print(f"Revenue: {revenue}")
+                        print(f"Headquarters: {headquarters}")
+                        print(f"Size: {size}")
+                        print(f"Job Description: {job_description}")
 
-                if verbose:
-                    print(f"Job Title: {job_title}")
-                    print(f"Salary Estimate: {lower_salary_estimate} - {higher_salary_estimate}")
-                    print(f"Salary Estimate Type: {estimate_type}")
-                    print(f"Company: {company_name}")
-                    print(f"Location: {location}")
-                    print(f"Company Rating: {rating}")
-                    print(f"Avg Base Salary: {avg_base_salary_value}")
-                    print(f"is Avg Base Salary per Hour: {is_avg_base_salary_hourly}")
-                    print(f"is Avg Base Salary per Year: {is_avg_base_salary_yearly}")
-                    print(f"Year Founded: {yr_founded}")
-                    print(f"Years Active: {yr_active}")
-                    print(f"Industry: {industry}")
-                    print(f"Sector: {sector}")
-                    print(f"Company Type: {company_type}")
-                    print(f"Revenue: {revenue}")
-                    print(f"Headquarters: {headquarters}")
-                    print(f"Size: {size}")
-                    print(f"Job Description: {job_description}")
-
-                scraped_jobs.append(
-                    {
-                        "Job Title": job_title,
-                        "Salary Range Estimate": f"{lower_salary_estimate} - {higher_salary_estimate}",
-                        "Salary Estimate Type": estimate_type,
-                        "Company": company_name,
-                        "Location": location,
-                        "Company Rating": rating,
-                        "Avg Base Salary": avg_base_salary_value,
-                        "is Avg Base Salary per Hour": is_avg_base_salary_hourly,
-                        "is Avg Base Salary per Year": is_avg_base_salary_yearly,
-                        "Year Founded": yr_founded,
-                        "Years Active": yr_active,
-                        "Industry": industry,
-                        "Sector": sector,
-                        "Company Type": company_type,
-                        "Revenue": revenue,
-                        "Headquarters": headquarters,
-                        "Size": size,
-                        "Job Description": job_description
-                    }
-                )
+                    scraped_jobs.append(
+                        {
+                            "Job Title": job_title,
+                            "Salary Range Estimate": f"{lower_salary_estimate} - {higher_salary_estimate}",
+                            "Salary Estimate Type": estimate_type,
+                            "Company": company_name,
+                            "Location": location,
+                            "Company Rating": rating,
+                            "Avg Base Salary": avg_base_salary_value,
+                            "is Avg Base Salary per Hour": is_avg_base_salary_hourly,
+                            "is Avg Base Salary per Year": is_avg_base_salary_yearly,
+                            "Year Founded": yr_founded,
+                            "Years Active": yr_active,
+                            "Industry": industry,
+                            "Sector": sector,
+                            "Company Type": company_type,
+                            "Revenue": revenue,
+                            "Headquarters": headquarters,
+                            "Size": size,
+                            "Job Description": job_description
+                        }
+                    )
 
             # Click Next Page for More Jobs
-            try:
-                if len(scraped_jobs) < num_jobs:
+            if len(scraped_jobs) < num_jobs:
+                next_button = self.driver.find_element(By.XPATH, "//button[(@data-test='pagination-next') and (contains(@class, 'nextButton'))]")
+                if next_button.is_enabled():
                     self.driver.find_element(By.XPATH, "//button[(@data-test='pagination-next') and (contains(@class, 'nextButton'))]").click()
                     sleep(10)
-            except NoSuchElementException:
-                print(f"No more jobs to scrape! Only {len(scraped_jobs)} jobs were available out of the required {num_jobs} jobs.")
-
-            # Store the scraped jobs to the scraped dataset variable
-            self.scraped_dataset = scraped_jobs
+                else:
+                    # Terminate scraping if there are no additional jobs in Glassdoor
+                    print(f"\n No more jobs to scrape! Only {len(scraped_jobs)} jobs were available out of the required {num_jobs} jobs")
+                    break
+        # Store the scraped jobs to the scraped dataset variable
+        self.scraped_dataset = scraped_jobs
 
     def dump_scraped_data_to_json(self, filename: str=str(datetime.now().strftime('%Y-%m-%dT%H:%M:%S'))) -> None:
         """

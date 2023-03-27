@@ -17,17 +17,17 @@
     > pip3 install -r requirements.txt
 3. In a python file, import the scraper class
     > from glassdoor_scraper import GlassdoorScraper
-4. Instantiate the class object and execute the job
+4. Instantiate the class object
     > demo_job = GlassdoorScraper()
-    > """ Initiate the Selenium WebDriver """
+5. Initiate the Selenium WebDriver
     > demo_job.initiate_selenium_driver()
-    > """ Execute the scraping - scrape at least 1000 data scientist jobs """
+6. Execute the scraping - scrape at least 1000 data scientist jobs
     > demo_job.get_jobs_data(keyword="data scientist", num_jobs=1000)
-    > """ Execute the scraping (with location) - scrape at least 1000 data scientist jobs """
+7. Execute the scraping (with location) - scrape at least 1000 data scientist jobs
     > demo_job.get_jobs_data(keyword="data scientist", location="dallas", num_jobs=1000)
-    > """ Execute the scraping (scrape with duplicate jobs) - scrape at least 1000 data scientist jobs """
+8. Execute the scraping (scrape with duplicate jobs) - scrape at least 1000 data scientist jobs
     > demo_job.get_jobs_data(keyword="data scientist", remove_duplicates=False, num_jobs=1000)
-    > """ Dump the scraped data to a JSON file - Stores in the current working directory"""
+9. Dump the scraped data to a JSON file - Stores in the current working directory
     > demo_job.dump_scraped_data_to_json(filename="demo_data_scientist_jobs.json")
 
 ### Sample Scraped Data

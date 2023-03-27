@@ -127,7 +127,7 @@ class GlassdoorScraper:
         """
         return f"//div[@id='EmpBasicInfo']/descendant::*[contains(text(),'{keyword}')]/following::*"
 
-    def get_jobs_data(self, keyword: str=None, location: str=None, num_jobs: int=0, verbose: bool=False) -> None:
+    def get_jobs_data(self, keyword: str=None, location: str=None, num_jobs: int=0, verbose: bool=False, remove_duplicates: bool=True) -> None:
         """
         Navigate to Glassdoor website and scrape the specified number of jobs if available
         Args:
@@ -135,6 +135,7 @@ class GlassdoorScraper:
             location (str, optional): job location preference. Defaults to None.
             num_jobs (int, optional): number of jobs to be scraped. Defaults to 0.
             verbose (bool, optional): display the job information. Defaults to False.
+            remove_duplicates (bool, optional): avoid scraping duplicate job entries. Defaults to True.
         """
         scraped_jobs = []
 
@@ -208,7 +209,6 @@ class GlassdoorScraper:
                         # If the current job is a duplicate, skip to the next
                         if f"{company_name}_{job_title}_{location}" in jobs_tracker:
                             collected_successfully = True
-                            print(f"Duplicate! Skipping to the next. - {company_name}_{job_title}_{location}")
                             duplicate = True
                         else:
                             jobs_tracker.append(f"{company_name}_{job_title}_{location}")
@@ -348,6 +348,14 @@ class GlassdoorScraper:
                     # Sleep and retry if the web driver crashed 
                     except DriverUnsuccessful:
                         sleep(5)
+
+                if duplicate:
+                    if not remove_duplicates:
+                        print(f"Duplicate! But appending as requested. - {company_name}_{job_title}_{location}")
+                        duplicate=False
+                    else:
+                        print(f"Duplicate! Skipping to the next. - {company_name}_{job_title}_{location}")
+
                 if not duplicate:
                     if verbose:
                         print(f"Job Title: {job_title}")
@@ -405,11 +413,18 @@ class GlassdoorScraper:
         # Store the scraped jobs to the scraped dataset variable
         self.scraped_dataset = scraped_jobs
 
+        # Tear down the webdriver instance
+        self.driver.quit()
+
     def dump_scraped_data_to_json(self, filename: str=str(datetime.now().strftime('%Y-%m-%dT%H:%M:%S'))) -> None:
         """
         Writes the scraped jobs to a JSON file
         Args:
             filename (str, optional): Filename to store the scraped data. Defaults to str(datetime.now().strftime('%Y-%m-%dT%H:%M:%S')).
         """
+
+        if filename.endswith('.json'):
+            filename = filename.replace('.json', '')
+
         with open(f"{filename}.json", "w", encoding="utf-8") as json_file:
             json.dump(self.scraped_dataset, json_file, ensure_ascii=False, indent=4)
